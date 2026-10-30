@@ -129,7 +129,9 @@ impl Win {
         if drawn.is_some() || self.config.desired_maximum_frame_latency != STEADY_LATENCY || self.config.present_mode != STEADY_PRESENT {
             self.config.desired_maximum_frame_latency = STEADY_LATENCY;
             self.config.present_mode = STEADY_PRESENT;
+            let configuring = Instant::now();
             self.surface.configure(device, &self.config);
+            if let Some(live) = &self.native.live { live.end_configured(configuring); }
         }
     }
 }

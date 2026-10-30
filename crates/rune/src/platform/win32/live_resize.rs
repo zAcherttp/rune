@@ -8,6 +8,7 @@
 use std::{cell::{Cell, RefCell}, rc::Rc, time::Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -19,6 +20,8 @@ pub(crate) const LIVE_LATENCY: u32 = 1;
 struct State {
     moving: Cell<bool>,
     ended: Cell<bool>,
+    /// When the loop began, and the process's CPU time then, for a traced drag's rate and load.
+    began: Cell<Option<(Instant, f64)>>,
     /// The first `Resized` no frame has served yet.
     pending: Cell<Option<Instant>>,
     /// The same for a resize outside the loop, while tracing.
@@ -51,7 +54,7 @@ impl LiveResize {
     pub(crate) fn new(window: &winit::window::Window, immediate: bool) -> Option<Self> {
         let RawWindowHandle::Win32(h) = window.window_handle().ok()?.as_raw() else { return None };
         let hwnd = h.hwnd.get() as HWND;
-        let state = Rc::new(State { moving: Cell::new(false), ended: Cell::new(false), pending: Cell::new(None), once: Cell::new(None), samples: RefCell::default(), configures: RefCell::default(), resizes: Cell::new(0), #[cfg(feature = "frame-profile")] phases: RefCell::default(), #[cfg(feature = "frame-profile")] native: RefCell::default() });
+        let state = Rc::new(State { moving: Cell::new(false), ended: Cell::new(false), began: Cell::new(None), pending: Cell::new(None), once: Cell::new(None), samples: RefCell::default(), configures: RefCell::default(), resizes: Cell::new(0), #[cfg(feature = "frame-profile")] phases: RefCell::default(), #[cfg(feature = "frame-profile")] native: RefCell::default() });
         if unsafe { SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, Rc::as_ptr(&state) as usize) } == 0 { return None; }
         let sync = std::env::var("RUNE_WIN_SYNC_RESIZE").map_or(true, |v| v != "0");
         let trace = std::env::var("RUNE_RESIZE_TRACE").is_ok_and(|v| v != "0");
@@ -93,6 +96,11 @@ impl LiveResize {
         if self.trace && self.state.moving.get() { self.state.configures.borrow_mut().push(since.elapsed().as_secs_f32() * 1000.0); }
     }
 
+    /// The `configure` that ends a drag, back at the window's size and the steady latency.
+    pub(crate) fn end_configured(&self, since: Instant) {
+        if self.trace { eprintln!("rune: live resize end: configure {:.2} ms", since.elapsed().as_secs_f32() * 1000.0); }
+    }
+
     /// A frame finished drawing.
     pub(crate) fn drew(&self) {
         if let Some(t) = self.state.once.take() {
@@ -117,7 +125,13 @@ impl LiveResize {
         let mut ms = std::mem::take(&mut *self.state.samples.borrow_mut());
         let mut cfg = std::mem::take(&mut *self.state.configures.borrow_mut());
         let resizes = self.state.resizes.replace(0);
+        let began = self.state.began.take();
         if self.trace && !ms.is_empty() {
+            if let Some((at, cpu)) = began {
+                let secs = at.elapsed().as_secs_f64();
+                eprintln!("rune: live resize drag: {secs:.2} s, {:.0} frames/s, process CPU {:.0}% of one core",
+                    ms.len() as f64 / secs, (process_cpu_ms() - cpu) / (secs * 10.0));
+            }
             let at = |v: &mut Vec<f32>, q: f32| {
                 if v.is_empty() { return 0.0; }
                 v.sort_by(f32::total_cmp);
@@ -150,11 +164,25 @@ impl Drop for LiveResize {
     }
 }
 
+/// User and kernel time this process has used.
+fn process_cpu_ms() -> f64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    let mut t = [FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 }; 4];
+    let [created, exited, kernel, user] = &mut t;
+    // SAFETY: the current-process pseudo-handle is valid and the four outputs are live FILETIMEs.
+    if unsafe { GetProcessTimes(GetCurrentProcess(), created, exited, kernel, user) } == 0 { return 0.0; }
+    let ticks = |t: &FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    (ticks(&t[2]) + ticks(&t[3])) as f64 / 10_000.0
+}
+
 unsafe extern "system" fn subclass(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _: usize, data: usize) -> LRESULT {
     // SAFETY: `data` is the `State` the owning `LiveResize` keeps alive until it removes this subclass.
     let state = unsafe { &*(data as *const State) };
     match message {
-        WM_ENTERSIZEMOVE => state.moving.set(true),
+        WM_ENTERSIZEMOVE => {
+            state.moving.set(true);
+            state.began.set(Some((Instant::now(), process_cpu_ms())));
+        }
         WM_EXITSIZEMOVE => {
             state.moving.set(false);
             state.ended.set(true);
