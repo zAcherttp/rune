@@ -13,6 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_EX_TRANSPARENT,
 };
 
+pub(crate) mod live_resize;
 mod pointer;
 
 fn hwnd(window: &winit::window::Window) -> Option<HWND> {

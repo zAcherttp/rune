@@ -35,18 +35,92 @@ pub(super) struct Win {
     pub(super) presented: Option<Presented>,
 }
 
+/// The surface's frame latency and present mode outside a live resize (`surface_config`).
+#[cfg(target_os = "windows")]
+const STEADY_LATENCY: u32 = 2;
+#[cfg(target_os = "windows")]
+const STEADY_PRESENT: wgpu::PresentMode = wgpu::PresentMode::AutoVsync;
+
 impl Win {
     /// Matches the drawable to the window's size; false when it already did.
     pub(super) fn resize_surface(&mut self, device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> bool {
         let (width, height) = (size.width.max(1), size.height.max(1));
+        #[cfg(target_os = "windows")]
+        if let Some(resized) = self.resize_live(device, (width, height)) { return resized; }
         if (self.config.width, self.config.height) == (width, height) { return false; }
         self.config.width = width;
         self.config.height = height;
+        // With the size, so a drag's first step configures once.
+        #[cfg(target_os = "windows")]
+        if let Some(live) = &self.native.live {
+            live.resized();
+            self.config.desired_maximum_frame_latency = live.latency(STEADY_LATENCY);
+            self.config.present_mode = live.present_mode(STEADY_PRESENT);
+        }
+        #[cfg(target_os = "windows")]
+        let configuring = Instant::now();
         self.surface.configure(device, &self.config);
+        #[cfg(target_os = "windows")]
+        if let Some(live) = &self.native.live { live.configured(configuring); }
         if let Some(alpha) = &mut self.alpha { alpha.resize(device, (width, height)); }
         #[cfg(target_os = "macos")]
         if let Some(shadow) = &self.native.shadow { shadow.redraw(); }
         true
+    }
+
+    /// The size frames draw at: the window's, which is the drawable's except while a drag keeps
+    /// a larger one (`resize_live`).
+    pub(super) fn drawn_size(&self) -> (u32, u32) {
+        #[cfg(target_os = "windows")]
+        if let Some(size) = self.native.drawn { return size; }
+        (self.config.width, self.config.height)
+    }
+
+    /// A step of the user's drag on an oversized drawable: a size that fits draws into it with
+    /// no `configure`, which waits for the present queue and reallocates every buffer. The
+    /// drag's first step, and one that outgrows it, configure once at the monitor's size.
+    /// `None` outside a drag, or where the drawable must match the window.
+    #[cfg(target_os = "windows")]
+    fn resize_live(&mut self, device: &wgpu::Device, size: (u32, u32)) -> Option<bool> {
+        let live = self.native.live.as_ref().filter(|l| l.drawing_live() && self.native.oversize && self.alpha.is_none())?;
+        if self.native.drawn == Some(size) { return Some(false); }
+        live.resized();
+        let fits = self.native.drawn.is_some() && size.0 <= self.config.width && size.1 <= self.config.height;
+        self.native.drawn = Some(size);
+        // The resting frame's drawable size no longer says whether a frame is the same.
+        self.presented = None;
+        if fits { return Some(true); }
+        let monitor = self.window.current_monitor().map_or(size, |m| (m.size().width, m.size().height));
+        let max = device.limits().max_texture_dimension_2d;
+        self.config.width = size.0.max(monitor.0).min(max);
+        self.config.height = size.1.max(monitor.1).min(max);
+        self.config.desired_maximum_frame_latency = live.latency(STEADY_LATENCY);
+        self.config.present_mode = live.present_mode(STEADY_PRESENT);
+        let configuring = Instant::now();
+        self.surface.configure(device, &self.config);
+        live.configured(configuring);
+        Some(true)
+    }
+
+    /// Whether this `Resized` is a step of the user's drag, to draw before it returns.
+    #[cfg(target_os = "windows")]
+    pub(super) fn drawing_live(&self) -> bool { self.native.live.as_ref().is_some_and(|l| l.drawing_live()) }
+
+    /// A frame for the last `Resized` finished.
+    #[cfg(target_os = "windows")]
+    pub(super) fn drew(&self) { if let Some(live) = &self.native.live { live.drew(); } }
+
+    /// After the size-move loop ends, back to the steady frame latency and present mode.
+    #[cfg(target_os = "windows")]
+    pub(super) fn end_live_resize(&mut self, device: &wgpu::Device) {
+        if !self.native.live.as_ref().is_some_and(|l| l.take_ended()) { return; }
+        let drawn = self.native.drawn.take();
+        if let Some((width, height)) = drawn { (self.config.width, self.config.height) = (width, height); }
+        if drawn.is_some() || self.config.desired_maximum_frame_latency != STEADY_LATENCY || self.config.present_mode != STEADY_PRESENT {
+            self.config.desired_maximum_frame_latency = STEADY_LATENCY;
+            self.config.present_mode = STEADY_PRESENT;
+            self.surface.configure(device, &self.config);
+        }
     }
 }
 

@@ -1006,6 +1006,10 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        // The frame's size, not the target's: a drawable can be larger than the frame (a
+        // Windows live resize keeps one, `Win::drawn_size`), and the rest of it stays unseen.
+        let (_, size) = self.target_frame(None);
+        pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
         if !blurs {
             self.draw_range(&mut pass, self.format, 0..self.count);
             return;

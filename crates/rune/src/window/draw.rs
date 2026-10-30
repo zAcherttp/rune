@@ -232,7 +232,7 @@ impl<S: 'static> Host<S> {
             ..Default::default()
         });
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
-        renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, (l.config.width, l.config.height));
+        renderer.prepare_surfaces(&gpu.device, &gpu.queue, &rt.surfaces, l.drawn_size());
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         let target = l.alpha.as_ref().map_or(&view, |a| &a.view);
         if let Some(c) = self.comp.as_mut() {
@@ -242,7 +242,7 @@ impl<S: 'static> Host<S> {
                 encoder: &mut enc,
                 target,
                 format: target_format,
-                size: (l.config.width, l.config.height),
+                size: l.drawn_size(),
                 dt,
                 update_ms,
                 rt: &mut *rt,
@@ -251,7 +251,7 @@ impl<S: 'static> Host<S> {
             c.render(&mut f);
             animating |= c.animating();
         } else {
-            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, (l.config.width, l.config.height));
+            renderer.prepare(&gpu.device, &gpu.queue, &mut rt.text.atlas, &rt.instances, l.drawn_size());
             renderer.draw(&mut enc, target, rt.clear_color());
         }
         if let Some(alpha) = &l.alpha { alpha.draw(&mut enc, &view); }

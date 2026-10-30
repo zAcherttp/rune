@@ -712,6 +712,8 @@ impl<S: 'static> Host<S> {
             use winit::platform::macos::WindowAttributesExtMacOS;
             attrs = attrs.with_titlebar_transparent(true).with_title_hidden(true).with_fullsize_content_view(true);
         }
+        #[cfg(target_os = "windows")]
+        { attrs = winit::platform::windows::WindowAttributesExtWindows::with_no_redirection_bitmap(attrs, crate::gpu::pick::windows_composition()); }
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
         #[cfg(target_os = "macos")]
         crate::native_menu::adopt_standard_view();
@@ -847,7 +849,9 @@ impl<S: 'static> Host<S> {
             launch_drawables,
             _spot: crate::platform::macos::traffic_lights::Spot::new(&window),
         };
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        let native = Native::new(&window, &surface, self.gpu.as_ref().map(|(gpu, _)| &gpu.adapter));
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let native = Native::default();
         self.win = Some(Win {
             native,

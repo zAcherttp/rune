@@ -192,6 +192,18 @@ fn request(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'_>>, power
     .map_err(|error| format!("no GPU adapter: {error}"))
 }
 
+/// Whether windows present through DirectComposition (`Gpu::instance`): DX12 is allowed and
+/// Windows lists a hardware card, so `pick` lands on it. Such a window needs no GDI redirection
+/// bitmap, which DWM would otherwise keep, stretch and show while a resize waits for the next
+/// frame. Windows 10 and 11 drivers run D3D12 on every card; one that doesn't falls back to
+/// Vulkan with no bitmap. Vulkan otherwise keeps it: how a Vulkan driver presents to an HWND is
+/// its own (NVIDIA's draws without the bitmap; Intel's and AMD's are unchecked).
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_composition() -> bool {
+    let allowed = wgpu::Backends::from_env().filter(|b| !b.is_empty()).is_none_or(|b| b.contains(wgpu::Backends::DX12));
+    allowed && !windows_cards().is_empty()
+}
+
 /// The first usable adapter whose name contains `name`, ignoring case.
 fn by_name(name: &str, adapters: &[(wgpu::AdapterInfo, bool)]) -> Option<usize> {
     let name = name.to_lowercase();

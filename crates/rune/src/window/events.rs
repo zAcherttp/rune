@@ -183,7 +183,11 @@ impl<S: 'static> Host<S> {
                 if let Some(l) = self.win.as_ref().filter(|l| l.native.full_screen.take()) {
                     self.rt.set_titlebar_inset(place_chrome(&l.window, self.chrome));
                 }
+                #[cfg(target_os = "windows")]
+                if let (Some(l), Some((gpu, ..))) = (self.win.as_mut(), self.gpu.as_ref()) { l.end_live_resize(&gpu.device); }
                 self.redraw();
+                #[cfg(target_os = "windows")]
+                if let Some(l) = &self.win { l.drew(); }
                 self.shell(event_loop);
                 return;
             }
@@ -247,6 +251,14 @@ impl<S: 'static> Host<S> {
                 if crate::platform::macos::in_live_resize(&l.window) {
                     if self.frame_anim.take().is_some() { l.present_with_transaction(false); }
                     self.draw(true);
+                    self.shell(event_loop);
+                    return;
+                }
+                // DWM shows the new size when `WM_SIZE` returns, likewise.
+                #[cfg(target_os = "windows")]
+                if l.drawing_live() {
+                    self.draw(true);
+                    if let Some(l) = &self.win { l.drew(); }
                     self.shell(event_loop);
                     return;
                 }
@@ -406,7 +418,7 @@ impl<S: 'static> Host<S> {
                 // AppKit needs the drag session started inside this mouse-dragged event.
                 if let Some(start) = rt.take_drag_out() {
                     let image = self.gpu.as_ref().filter(|_| start.item.drag_image().is_none()).and_then(|(gpu, renderer)|
-                        crate::drag_out::snapshot(gpu, renderer, (l.config.width, l.config.height), scale, rt.clear_color(), start.rect));
+                        crate::drag_out::snapshot(gpu, renderer, l.drawn_size(), scale, rt.clear_color(), start.rect));
                     let (sink, path) = (rt.drag_end_sink(), start.path.clone());
                     let handle = self.native_handle.clone();
                     crate::drag_out::begin(&l.window, start, image, Box::new(move |outcome| {
