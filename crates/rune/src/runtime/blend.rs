@@ -38,14 +38,35 @@ impl<S: 'static> Runtime<S> {
 
     pub fn clear_color(&self) -> [f32; 4] {
         if self.transparent { return [0.0; 4]; }
-        self.nodes.get(self.app_root()).map_or([0.0, 0.0, 0.0, 1.0], |n| {
-            let c = self.color(n.id, P_FILL, n.vis.fill);
+        self.backdrop_fill().map_or([0.0, 0.0, 0.0, 1.0], |c| {
             if self.srgb_blend {
                 [srgb_encode(c.r), srgb_encode(c.g), srgb_encode(c.b), 1.0]
             } else {
                 [c.r, c.g, c.b, 1.0]
             }
         })
+    }
+
+    /// The window's background: the app root's fill, or, where the root fills nothing (a kit
+    /// root around a page), the first of the next `BACKDROP_SCAN` elements under it that covers
+    /// the window with an opaque fill. It clears the drawable, so it is what shows past the
+    /// frame while a Windows live resize waits for the next one (`Win::resize_live`).
+    fn backdrop_fill(&self) -> Option<crate::color::Color> {
+        const BACKDROP_SCAN: usize = 64;
+        let root = self.app_root();
+        let node = self.nodes.get(root)?;
+        let fill = self.color(node.id, P_FILL, node.vis.fill);
+        if fill.a > 0.0 { return Some(fill); }
+        let (w, h) = self.viewport;
+        // Root-space rects start at the window's origin, so either corner form covers alike.
+        let covers = |r: &[f32; 4]| r[0] <= 0.5 && r[1] <= 0.5 && r[2] >= w - 0.5 && r[3] >= h - 0.5;
+        let under = |mut i: usize| loop {
+            match self.nodes[i].parent { Some(p) if p == root => break true, Some(p) => i = p, None => break false }
+        };
+        (root + 1..self.nodes.len().min(root + 1 + BACKDROP_SCAN))
+            .filter(|&i| self.drawn.get(i).is_some_and(covers) && under(i))
+            .map(|i| self.color(self.nodes[i].id, P_FILL, self.nodes[i].vis.fill))
+            .find(|c| c.a >= 1.0)
     }
 }
 
@@ -71,3 +92,7 @@ pub(crate) fn glyph(q: &GlyphQuad, fill: [f32; 4], clip: [f32; 4], fade: [f32; 4
 pub(crate) fn premul(c: Color, opacity: f32, srgb: bool) -> [f32; 4] {
     if srgb { c.premul_srgb(opacity) } else { c.premul(opacity) }
 }
+
+#[cfg(test)]
+#[path = "blend_tests.rs"]
+mod tests;
