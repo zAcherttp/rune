@@ -262,6 +262,15 @@ impl<S: 'static> Host<S> {
                     self.shell(event_loop);
                     return;
                 }
+                // Maximise, restore, Snap and a scale change come as one `WM_SIZE` outside the
+                // loop, shown when it returns too. A size Rune steps itself draws on its frames.
+                #[cfg(target_os = "windows")]
+                if !asked && rt.window_frame.is_none() && l.resized_once() {
+                    self.redraw();
+                    if let Some(l) = &self.win { l.drew(); }
+                    self.shell(event_loop);
+                    return;
+                }
                 l.window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {

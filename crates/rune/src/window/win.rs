@@ -106,6 +106,16 @@ impl Win {
     #[cfg(target_os = "windows")]
     pub(super) fn drawing_live(&self) -> bool { self.native.live.as_ref().is_some_and(|l| l.drawing_live()) }
 
+    /// A size outside the size-move loop (maximise, restore, Snap, a scale change): starts its
+    /// trace, and says whether it draws before `Resized` returns. Not before the first frame,
+    /// which reveals the window on its own terms.
+    #[cfg(target_os = "windows")]
+    pub(super) fn resized_once(&self) -> bool {
+        let Some(live) = &self.native.live else { return false };
+        live.resized_once();
+        live.draws_resizes() && self.visible && self.first_frame.notified
+    }
+
     /// A frame for the last `Resized` finished.
     #[cfg(target_os = "windows")]
     pub(super) fn drew(&self) { if let Some(live) = &self.native.live { live.drew(); } }

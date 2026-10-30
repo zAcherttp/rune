@@ -1,7 +1,9 @@
 //! The Win32 size-move loop, which winit 0.30 doesn't report. DWM shows each size a drag
 //! reaches when `WM_SIZE` returns, so inside the loop a window draws in `Resized`, at one frame
-//! of latency, as a macOS live resize does. `RUNE_WIN_SYNC_RESIZE=0` keeps the deferred redraw;
-//! `RUNE_RESIZE_TRACE=1` prints each drag's `Resized`-to-drawn times.
+//! of latency, as a macOS live resize does. A size that comes outside the loop (maximise,
+//! restore, Snap, a scale change) draws in its `Resized` too, at the steady latency.
+//! `RUNE_WIN_SYNC_RESIZE=0` keeps the deferred redraw for both; `RUNE_RESIZE_TRACE=1` prints
+//! each drag's `Resized`-to-drawn times, and each one-off resize's.
 
 use std::{cell::{Cell, RefCell}, rc::Rc, time::Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -19,6 +21,8 @@ struct State {
     ended: Cell<bool>,
     /// The first `Resized` no frame has served yet.
     pending: Cell<Option<Instant>>,
+    /// The same for a resize outside the loop, while tracing.
+    once: Cell<Option<Instant>>,
     samples: RefCell<Vec<f32>>,
     /// Time in `surface.configure`, of `samples`.
     configures: RefCell<Vec<f32>>,
@@ -47,7 +51,7 @@ impl LiveResize {
     pub(crate) fn new(window: &winit::window::Window, immediate: bool) -> Option<Self> {
         let RawWindowHandle::Win32(h) = window.window_handle().ok()?.as_raw() else { return None };
         let hwnd = h.hwnd.get() as HWND;
-        let state = Rc::new(State { moving: Cell::new(false), ended: Cell::new(false), pending: Cell::new(None), samples: RefCell::default(), configures: RefCell::default(), resizes: Cell::new(0), #[cfg(feature = "frame-profile")] phases: RefCell::default(), #[cfg(feature = "frame-profile")] native: RefCell::default() });
+        let state = Rc::new(State { moving: Cell::new(false), ended: Cell::new(false), pending: Cell::new(None), once: Cell::new(None), samples: RefCell::default(), configures: RefCell::default(), resizes: Cell::new(0), #[cfg(feature = "frame-profile")] phases: RefCell::default(), #[cfg(feature = "frame-profile")] native: RefCell::default() });
         if unsafe { SetWindowSubclass(hwnd, Some(subclass), SUBCLASS_ID, Rc::as_ptr(&state) as usize) } == 0 { return None; }
         let sync = std::env::var("RUNE_WIN_SYNC_RESIZE").map_or(true, |v| v != "0");
         let trace = std::env::var("RUNE_RESIZE_TRACE").is_ok_and(|v| v != "0");
@@ -62,6 +66,14 @@ impl LiveResize {
 
     /// Inside the size-move loop, with the synchronous path on.
     pub(crate) fn drawing_live(&self) -> bool { self.sync && self.state.moving.get() }
+
+    /// Whether a resize outside the loop draws in its `Resized`.
+    pub(crate) fn draws_resizes(&self) -> bool { self.sync }
+
+    /// A resize outside the loop, timed to its frame while tracing.
+    pub(crate) fn resized_once(&self) {
+        if self.trace && !self.state.moving.get() && self.state.once.get().is_none() { self.state.once.set(Some(Instant::now())); }
+    }
 
     /// The frame latency the surface wants now.
     pub(crate) fn latency(&self, steady: u32) -> u32 { if self.drawing_live() { LIVE_LATENCY } else { steady } }
@@ -83,6 +95,9 @@ impl LiveResize {
 
     /// A frame finished drawing.
     pub(crate) fn drew(&self) {
+        if let Some(t) = self.state.once.take() {
+            eprintln!("rune: resize outside a drag ({}): Resized→drawn {:.2} ms", if self.sync { "sync" } else { "deferred" }, t.elapsed().as_secs_f32() * 1000.0);
+        }
         let Some(t) = self.state.pending.take() else { return };
         let ms = t.elapsed().as_secs_f32() * 1000.0;
         self.state.samples.borrow_mut().push(ms);
