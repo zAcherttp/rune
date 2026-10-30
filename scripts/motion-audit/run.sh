@@ -7,7 +7,7 @@ O=${1:-target/motion-audit}
 mkdir -p "$O"
 cargo build --release -p todo -p settings -p kit-gallery -p odometer
 cargo build --release -p rune-kit --example shell
-cargo build --release -p rune --example growth_reorder
+cargo build --release -p rune --example growth_reorder --example sticky
 B=${CARGO_TARGET_DIR:-target}/release
 SH=$B/examples/shell
 GR=$B/examples/growth_reorder
@@ -42,4 +42,5 @@ run shell-window-resize 3.0 $SH --script $S/shell-window-resize.json
 run shell-virtual-window-resize 3.0 $SH virtual --script $S/shell-window-resize.json
 run growth-reorder    4.2 $GR --script $S/growth-reorder.json
 run growth-reorder-virtual 4.0 $GR virtual --script $S/growth-reorder-virtual.json
+run sticky-scroll     1.6 $B/examples/sticky --script crates/rune/examples/sticky.json
 ls "$O"
