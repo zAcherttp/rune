@@ -18,7 +18,7 @@ mod layer_timing;
 
 use std::collections::{HashMap, HashSet};
 
-use rune::{AppSpec, Cx, El, TextEdit, col};
+use rune::{AppSpec, Cx, El, ScrollSpec, TextEdit, col};
 use rune_kit::Kit;
 
 pub struct G {
@@ -105,7 +105,9 @@ fn view(s: &G, cx: &mut Cx<G>) -> El {
     let mut overlays = Vec::new();
     let body = stories::render(s, k, &mut overlays);
     // Storybook's decorator: the page colour and 24 px of padding around the story.
-    rune_kit::root(col().key("frame").fill(k.c.page).padding(24.0).child(body), overlays)
+    // Scroll viewport so the full index (every story stacked) can be scrolled in a live window.
+    let frame = col().key("frame").fill(k.c.page).w_full().h_full().scroll(ScrollSpec { stick_bottom: false });
+    rune_kit::root(frame.child(col().key("pad").padding(24.0).child(body)), overlays)
 }
 
 fn main() {
