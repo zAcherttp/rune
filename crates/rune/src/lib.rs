@@ -122,6 +122,7 @@ mod el_child_exit;
 mod el_drop;
 mod el_effect;
 mod el_focus;
+mod el_growth;
 mod el_pills;
 mod el_pixel_snap;
 mod el_ride_trailing;
