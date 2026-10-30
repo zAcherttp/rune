@@ -479,6 +479,7 @@ pub(crate) struct Node {
     growth: Option<Box<GrowthSpec>>,
     streaming: bool,
     whole: bool,
+    glide: Option<rune_motion::Spring>,
     input: Option<Box<InputSpec>>,
     cursor: Option<crate::el::Cursor>,
     window_drag: bool,
@@ -3460,11 +3461,10 @@ impl<S: 'static> Runtime<S> {
                 let g = self.grows.entry(id).or_insert_with(|| {
                     if existed && !instant && !nodes[j].virtual_mount { GrowTrack { streaming, whole, duration, ..GrowTrack::settled(0.0) } } else { GrowTrack::settled(h) }
                 });
-                g.streaming = streaming;
-                g.whole = whole;
+                g.set_kind(streaming, whole, nodes[j].glide, self.viewport.1);
                 let snap_change = (instant || resized) && !streaming && (h - g.target).abs() > 1e-4;
                 if tx.settle || !existed || first || self.reduced_motion || snap_change || row_reading {
-                    *g = GrowTrack { streaming, whole, ..GrowTrack::settled(h) };
+                    *g = GrowTrack { streaming, whole, glide: g.glide, reach: g.reach, ..GrowTrack::settled(h) };
                     stack.pending_heights.remove(&id);
                 } else {
                     // Only a width/scale rewrap may shrink an active streaming row, including
