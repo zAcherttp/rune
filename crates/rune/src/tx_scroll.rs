@@ -16,13 +16,32 @@ impl Tx {
     /// `"inspector/label"` whose leading keys are the element's nearest keyed ancestors, which
     /// tells apart an app's `label` from a component's.
     pub fn scroll_into_view(&mut self, key: impl Into<String>) {
-        self.scroll_to.push((None, key.into()));
+        self.scroll_to.push(crate::runtime::ScrollReveal::into_view(None, key.into()));
     }
     /// [`Tx::scroll_into_view`] for row `key` inside the element keyed `scope` only, so lists
     /// that key their rows alike (a file tree and a diff, both by path) don't reveal each
     /// other's rows.
     pub fn scroll_into_view_in(&mut self, scope: impl Into<String>, key: impl Into<String>) {
-        self.scroll_to.push((Some(scope.into()), key.into()));
+        self.scroll_to.push(crate::runtime::ScrollReveal::into_view(Some(scope.into()), key.into()));
+    }
+    /// Reveal and vertically centre a keyed element, virtual row or [`crate::TextHighlight`],
+    /// gliding on the scroll spring [`Tx::scroll_to_bottom`] uses (instant under [`Tx::instant`],
+    /// reduced motion or a settled frame). `"row/mark"` mounts virtual row `row` first and
+    /// centres `mark` inside it.
+    pub fn scroll_center(&mut self, key: impl Into<String>) {
+        self.scroll_to.push(crate::runtime::ScrollReveal::center(None, key.into(), true));
+    }
+    /// [`Tx::scroll_center`] scoped to the subtree keyed `scope`.
+    pub fn scroll_center_in(&mut self, scope: impl Into<String>, key: impl Into<String>) {
+        self.scroll_to.push(crate::runtime::ScrollReveal::center(Some(scope.into()), key.into(), true));
+    }
+    /// [`Tx::scroll_center`] without the glide.
+    pub fn scroll_center_instant(&mut self, key: impl Into<String>) {
+        self.scroll_to.push(crate::runtime::ScrollReveal::center(None, key.into(), false));
+    }
+    /// [`Tx::scroll_center_in`] without the glide.
+    pub fn scroll_center_in_instant(&mut self, scope: impl Into<String>, key: impl Into<String>) {
+        self.scroll_to.push(crate::runtime::ScrollReveal::center(Some(scope.into()), key.into(), false));
     }
     /// Glide the scroll viewport keyed `key` (or the one containing it) to its bottom, as a
     /// "jump to latest" button does. A `stick_bottom` viewport follows the end again once it
